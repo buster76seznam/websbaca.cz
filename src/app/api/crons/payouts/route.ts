@@ -97,6 +97,16 @@ function isDueForMonthlyPayout(referral: ActiveReferral): boolean {
 
 export async function GET(req: NextRequest) {
   try {
+    // Ochrana cron endpointu - vyžaduje Authorization: Bearer CRON_SECRET
+    const authHeader = req.headers.get('authorization');
+    if (!process.env.CRON_SECRET) {
+      console.error('Payouts cron: CRON_SECRET is not configured in environment variables!');
+      return NextResponse.json({ error: 'Server misconfiguration: CRON_SECRET not set' }, { status: 500 });
+    }
+    if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 

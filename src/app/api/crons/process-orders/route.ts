@@ -140,6 +140,10 @@ async function processOrder(order: Database['public']['Tables']['orders']['Row']
 
 export async function GET(request: Request) {
   const authHeader = request.headers.get('authorization');
+  if (!process.env.CRON_SECRET) {
+    console.error('Process-orders cron: CRON_SECRET is not configured in environment variables!');
+    return NextResponse.json({ error: 'Server misconfiguration: CRON_SECRET not set' }, { status: 500 });
+  }
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return new Response('Unauthorized', {
       status: 401,
