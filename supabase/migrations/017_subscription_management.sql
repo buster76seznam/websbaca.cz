@@ -11,7 +11,13 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS paid_months_count INTEGER DEFAULT 0;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS subscription_start_at TIMESTAMPTZ;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS status_before_suspension TEXT;
 
--- 2) Allow new lifecycle statuses (suspended = unpaid website, expired = stale draft)
+-- 2) Normalizace legacy českých stavů na anglické ekvivalenty
+--    (jinak by ADD CONSTRAINT selhal na starých řádcích)
+UPDATE orders SET status = 'draft' WHERE status = 'čeká';
+UPDATE orders SET status = 'completed' WHERE status = 'dokončená';
+UPDATE orders SET status = 'development' WHERE status = 'vývoj';
+
+-- 3) Allow new lifecycle statuses (suspended = unpaid website, expired = stale draft)
 ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_status_check;
 ALTER TABLE orders ADD CONSTRAINT orders_status_check CHECK (status IN (
   'draft', 'queued', 'development', 'completed', 'generated', 'preview_ready',
