@@ -36,6 +36,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Maximální počet revizí byl vyčerpán.' }, { status: 400 });
     }
 
+    // Blokace AI revizí při nezaplaceném předplatném
+    const billingBlocked =
+      order.payment_status === 'overdue' ||
+      order.payment_status === 'unpaid' ||
+      order.status === 'suspended';
+
+    if (billingBlocked) {
+      return NextResponse.json(
+        {
+          error: 'Your subscription payment is unpaid. New AI revisions are blocked until the payment is completed. Please update your payment method to restore access.',
+          payment_status: order.payment_status || 'unpaid'
+        },
+        { status: 402 }
+      );
+    }
+
     // Update feedback history
     const history = Array.isArray(order.feedback_history) ? order.feedback_history : [];
     const newHistory = [...history, { date: new Date().toISOString(), feedback }];

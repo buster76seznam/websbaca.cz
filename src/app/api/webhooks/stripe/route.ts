@@ -9,6 +9,85 @@ export const runtime = 'nodejs';
 // Vypnout automatický body parser – Stripe vyžaduje raw body pro ověření podpisu
 export const dynamic = 'force-dynamic';
 
+const GRACE_PERIOD_DAYS = 15;
+
+type OrderRow = {
+  id: string;
+  status: string;
+  company_name: string;
+  company_email: string;
+  domain: string;
+  price: number | null;
+  ref_code: string | null;
+  stripe_checkout_session_id: string | null;
+  stripe_subscription_id: string | null;
+  payment_status: string | null;
+  first_failed_at: string | null;
+  paid_months_count: number | null;
+  status_before_suspension: string | null;
+};
+
+/** Najde objednávku podle ID Stripe předplatného */
+async function findOrderBySubscriptionId(subscriptionId: string | null | undefined): Promise<OrderRow | null> {
+  if (!subscriptionId) return null;
+  const { data: order, error } = await supabaseAdmin
+    .from('orders')
+    .select('*')
+    .eq('stripe_subscription_id', subscriptionId)
+    .maybeSingle();
+  if (error) {
+    console.error('Webhook: failed to find order by subscription:', error.message);
+    return null;
+  }
+  return order || null;
+}
+
+/** Pozastaví web klienta (15 dní po nezaplacení / Stripe stav unpaid) */
+async function suspendOrder(order: OrderRow): Promise<void> {
+  if (order.status === 'suspended') return; // already suspended
+
+  const { error } = await supabaseAdmin
+    .from('orders')
+    .update({
+      status_before_suspension: order.status,
+      status: 'suspended',
+      payment_status: 'unpaid',
+      status_updated_at: new Date().toISOString()
+    })
+    .eq('id', order.id);
+
+  if (error) {
+    console.error(`Webhook: failed to suspend order ${order.id}:`, error.message);
+  } else {
+    console.log(`Webhook: order ${order.id} SUSPENDED (website offline, previous status: ${order.status})`);
+  }
+}
+
+/** Obnoví web klienta po úspěšné platbě */
+async function reactivateOrder(order: OrderRow): Promise<void> {
+  const restoredStatus =
+    order.status === 'suspended'
+      ? (order.status_before_suspension || 'active')
+      : order.status;
+
+  const { error } = await supabaseAdmin
+    .from('orders')
+    .update({
+      status: restoredStatus,
+      status_before_suspension: null,
+      payment_status: 'active',
+      first_failed_at: null,
+      status_updated_at: new Date().toISOString()
+    })
+    .eq('id', order.id);
+
+  if (error) {
+    console.error(`Webhook: failed to reactivate order ${order.id}:`, error.message);
+  } else {
+    console.log(`Webhook: order ${order.id} REACTIVATED (restored to status: ${restoredStatus})`);
+  }
+}
+
 export async function POST(request: NextRequest) {
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
@@ -67,14 +146,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ received: true });
     }
 
-    // 1. Aktualizace statusu objednávky na PENDING_DOMAIN
+    // 1. Aktualizace statusu objednávky na PENDING_DOMAIN + platební údaje
+    const orderUpdate: Record<string, unknown> = {
+      status: 'pending_domain',
+      stripe_checkout_session_id: session.id,
+      payment_status: 'active',
+      status_updated_at: new Date().toISOString()
+    };
+
+    // U předplatného uložíme ID subscription pro pozdější webhooky
+    if (session.mode === 'subscription' && typeof session.subscription === 'string') {
+      orderUpdate.stripe_subscription_id = session.subscription;
+      orderUpdate.subscription_start_at = new Date().toISOString();
+    }
+
     const { error: updateError } = await supabaseAdmin
       .from('orders')
-      .update({ 
-        status: 'pending_domain', 
-        stripe_checkout_session_id: session.id,
-        status_updated_at: new Date().toISOString()
-      })
+      .update(orderUpdate)
       .eq('id', orderId);
 
     if (updateError) {
@@ -161,6 +249,131 @@ export async function POST(request: NextRequest) {
       } catch (affiliateErr) {
         console.error('Webhook: affiliate commission processing failed:', affiliateErr);
       }
+    }
+  }
+
+  // =========================================================
+  // invoice.payment_failed - selhala měsíční platba (začátek grace periody)
+  // =========================================================
+  else if (event.type === 'invoice.payment_failed') {
+    const invoice = event.data.object as Stripe.Invoice;
+    const subscriptionId = typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id;
+
+    const order = await findOrderBySubscriptionId(subscriptionId);
+    if (!order) {
+      console.warn(`Webhook: invoice.payment_failed - no order for subscription ${subscriptionId}`);
+      return NextResponse.json({ received: true });
+    }
+
+    const { error } = await supabaseAdmin
+      .from('orders')
+      .update({
+        payment_status: 'overdue',
+        first_failed_at: order.first_failed_at || new Date().toISOString(),
+        status_updated_at: new Date().toISOString()
+      })
+      .eq('id', order.id);
+
+    if (error) {
+      console.error(`Webhook: failed to mark order ${order.id} overdue:`, error.message);
+    } else {
+      console.log(`Webhook: order ${order.id} marked OVERDUE (${GRACE_PERIOD_DAYS}-day grace period started). AI revisions blocked.`);
+    }
+  }
+
+  // =========================================================
+  // invoice.payment_succeeded - proběhla měsíční platba (obnova / další měsíc)
+  // =========================================================
+  else if (event.type === 'invoice.payment_succeeded') {
+    const invoice = event.data.object as Stripe.Invoice;
+
+    // První platba z checkoutu má svůj handler - zde řešíme pouze opakované (měsíční) faktury
+    if (invoice.billing_reason !== 'subscription_cycle') {
+      console.log(`Webhook: invoice.payment_succeeded ignored (billing_reason=${invoice.billing_reason})`);
+      return NextResponse.json({ received: true });
+    }
+
+    const subscriptionId = typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id;
+    const order = await findOrderBySubscriptionId(subscriptionId);
+
+    if (!order) {
+      console.warn(`Webhook: invoice.payment_succeeded - no order for subscription ${subscriptionId}`);
+      return NextResponse.json({ received: true });
+    }
+
+    // Připočítat zaplacený měsíc a vyčistit stav selhání
+    const { error } = await supabaseAdmin
+      .from('orders')
+      .update({
+        paid_months_count: (order.paid_months_count || 0) + 1,
+        payment_status: 'active',
+        first_failed_at: null,
+        status_updated_at: new Date().toISOString()
+      })
+      .eq('id', order.id);
+
+    if (error) {
+      console.error(`Webhook: failed to record successful payment for order ${order.id}:`, error.message);
+      return NextResponse.json({ received: true });
+    }
+
+    const newCount = (order.paid_months_count || 0) + 1;
+    console.log(`Webhook: order ${order.id} monthly payment succeeded (paid_months_count=${newCount})`);
+
+    // Pokud byl web pozastavený nebo v režimu selhání, automaticky ho obnovíme
+    if (order.status === 'suspended' || order.payment_status === 'unpaid' || order.payment_status === 'overdue') {
+      await reactivateOrder(order);
+    }
+  }
+
+  // =========================================================
+  // customer.subscription.updated - změna stavu předplatného ve Stripe
+  // =========================================================
+  else if (event.type === 'customer.subscription.updated') {
+    const subscription = event.data.object as Stripe.Subscription;
+    const subStatus = subscription.status; // active | past_due | unpaid | canceled ...
+
+    const order = await findOrderBySubscriptionId(subscription.id);
+    if (!order) {
+      console.warn(`Webhook: customer.subscription.updated - no order for subscription ${subscription.id}`);
+      return NextResponse.json({ received: true });
+    }
+
+    if (subStatus === 'unpaid') {
+      // 15 dní bez úhrady - pozastavit web
+      console.log(`Webhook: subscription ${subscription.id} is UNPAID -> suspending website`);
+      await suspendOrder(order);
+    } else if (subStatus === 'past_due') {
+      // Platba stále selhává, běží grace perioda (AI revize zablokované)
+      if (order.payment_status !== 'overdue') {
+        await supabaseAdmin
+          .from('orders')
+          .update({
+            payment_status: 'overdue',
+            first_failed_at: order.first_failed_at || new Date().toISOString(),
+            status_updated_at: new Date().toISOString()
+          })
+          .eq('id', order.id);
+      }
+      console.log(`Webhook: subscription ${subscription.id} PAST_DUE -> grace period running, AI revisions blocked`);
+    } else if (subStatus === 'active') {
+      // Předplatné znovu aktivní - obnovit web a odblokovat revize
+      console.log(`Webhook: subscription ${subscription.id} ACTIVE -> ensuring website restored`);
+      if (order.payment_status !== 'active' || order.status === 'suspended') {
+        await supabaseAdmin
+          .from('orders')
+          .update({
+            payment_status: 'active',
+            first_failed_at: null,
+            status_updated_at: new Date().toISOString()
+          })
+          .eq('id', order.id);
+        if (order.status === 'suspended') {
+          await reactivateOrder(order);
+        }
+      }
+    } else {
+      console.log(`Webhook: subscription ${subscription.id} status "${subStatus}" - no action needed`);
     }
   }
 

@@ -132,6 +132,47 @@ export default async function PreviewPage({
     );
   }
 
+  // ===== Pozastavení služeb z důvodu nezaplacení =====
+  // Web je pozastavený, pokud: status = 'suspended' (Stripe unpaid)
+  // NEBO platba selhala (overdue) a uplynula 15denní grace perioda
+  const GRACE_MS = 15 * 24 * 60 * 60 * 1000;
+  const graceExpired =
+    !!order.first_failed_at &&
+    Date.now() - new Date(order.first_failed_at).getTime() > GRACE_MS;
+  const isSuspended =
+    order.status === 'suspended' ||
+    ((order.payment_status === 'unpaid' || order.payment_status === 'overdue') && graceExpired);
+
+  if (isSuspended) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center p-6">
+        <div className="text-center max-w-lg bg-gray-900 border border-gray-800 p-10 rounded-2xl shadow-xl">
+          <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-yellow-500/10 flex items-center justify-center">
+            <svg className="w-8 h-8 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-bold text-white mb-3">Services Temporarily Suspended</h1>
+          <p className="text-gray-400 leading-relaxed mb-2">
+            This website is currently suspended due to an unpaid invoice.
+          </p>
+          <p className="text-gray-500 text-sm leading-relaxed mb-8">
+            To restore your website, please update your payment method or contact our support at{' '}
+            <a href="mailto:webs.baca.support@gmail.com" className="text-indigo-400 hover:text-indigo-300 underline">
+              webs.baca.support@gmail.com
+            </a>
+            . Your website will be automatically restored after the payment is completed.
+          </p>
+          <Link
+            href="mailto:webs.baca.support@gmail.com"
+            className="inline-block bg-indigo-600 text-white font-semibold px-6 py-2.5 rounded-lg hover:bg-indigo-700 transition-colors"
+          >
+            Contact Support
+          </Link>
+        </div>
+      </div>
+    );
+  }
   // Ošetření načítání dat v komponentě - parsování generated_site_json
   const siteJson = typeof order.generated_site_json === 'string' 
     ? JSON.parse(order.generated_site_json) 

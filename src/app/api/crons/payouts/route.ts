@@ -42,13 +42,15 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 });
 
 /**
- * Ověří u Stripe, že klient skutečně zaplatil (checkout session je complete & paid).
- * Vrací true pouze pokud platba byla potvrzena Stripem.
+ * Ověří, že klient může dostat provizi:
+ * 1. V DB má platba za daný měsíc stav paid/active (neprobíhá grace perioda)
+ * 2. Klient úspěšně prošel grace periodou (není overdue ani unpaid)
+ * 3. Stripe potvrzuje, že checkout session je complete & paid
  */
 async function verifyStripePayment(orderId: string): Promise<boolean> {
   const { data: order, error } = await supabase
     .from('orders')
-    .select('stripe_checkout_session_id, status')
+    .select('stripe_checkout_session_id, status, payment_status, first_failed_at')
     .eq('id', orderId)
     .single();
 
@@ -61,6 +63,14 @@ async function verifyStripePayment(orderId: string): Promise<boolean> {
   const paidStatuses = ['pending_domain', 'active', 'completed'];
   if (!paidStatuses.includes(order.status || '')) {
     console.warn(`Payout verify: order ${orderId} has status "${order.status}" - not paid`);
+    return false;
+  }
+
+  // Platba za daný měsíc musí mít stav "paid" (active) - klient prošel grace periodou.
+  // Provize se nevyplácí klientům v grace periodě (overdue) nebo s pozastaveným webem (unpaid).
+  const payStatus = order.payment_status;
+  if (payStatus === 'overdue' || payStatus === 'unpaid') {
+    console.warn(`Payout verify: order ${orderId} has payment_status "${payStatus}" - commission skipped until payment is restored`);
     return false;
   }
 
