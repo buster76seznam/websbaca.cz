@@ -347,7 +347,7 @@ export default function PartnerProgramPage() {
 
         <footer className="py-20 px-4 sm:px-6 md:px-8 border-t border-gray-200 dark:border-white/5 bg-gray-50 dark:bg-[#020202] w-full max-w-full overflow-hidden">
           <div className="max-w-7xl mx-auto text-center text-sm text-gray-600 dark:text-zinc-500 font-bold">
-            <p>Questions? Contact us: <a href="mailto:webs.baca@gmail.com" className="text-brand hover:text-brand-dark transition">webs.baca@gmail.com</a></p>
+            <p>Questions? Contact us: <a href="mailto:info@websbaca.cz" className="text-brand hover:text-brand-dark transition">info@websbaca.cz</a></p>
           </div>
         </footer>
       </div>

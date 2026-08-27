@@ -471,7 +471,7 @@ export default function Home() {
                     <div className="w-10 h-10 rounded-xl glass flex items-center justify-center group-hover:bg-brand transition-colors">
                       <Mail size={18} />
                     </div>
-                    webs.baca@gmail.com
+                    info@websbaca.cz
                   </button>
                   <div className="flex items-center gap-4 group">
                     <div className="w-10 h-10 rounded-xl glass flex items-center justify-center group-hover:bg-brand transition-colors">

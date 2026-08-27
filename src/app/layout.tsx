@@ -90,7 +90,7 @@ const jsonLd = {
       name: "Webs Bača",
       url: SITE_URL,
       logo: `${SITE_URL}/Logo.png`,
-      email: "webs.baca@gmail.com",
+      email: "info@websbaca.cz",
     },
     {
       "@type": "ProfessionalService",

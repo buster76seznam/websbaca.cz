@@ -46,7 +46,7 @@ DATABASE_URL=your_database_url_here
 ## 🔍 Reporting Security Issues
 
 If you discover any security vulnerabilities, please report them immediately to:
-- Email: webs.baca@gmail.com
+- Email: info@websbaca.cz
 - Subject: SECURITY ISSUE - [Project Name]
 
 ## 📋 Best Practices
