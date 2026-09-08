@@ -43,7 +43,14 @@ export default function PartnerProgramPage() {
 
   const generateQRCode = async (url: string) => {
     try {
-      const qr = await QRCode.toDataURL(url);
+      const qr = await QRCode.toDataURL(url, {
+        width: 512,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF',
+        },
+      });
       setQrCode(qr);
     } catch (error) {
       console.error('Failed to generate QR code:', error);
@@ -58,14 +65,84 @@ export default function PartnerProgramPage() {
     }
   };
 
-  const handleDownloadQR = () => {
-    if (!qrCode) return;
-    const link = document.createElement('a');
-    link.href = qrCode;
-    link.download = `websbaca-referral-${partner?.partnerId || 'qrcode'}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const handleDownloadPNG = async () => {
+    if (!partner?.referralLink) return;
+    try {
+      const highResQr = await QRCode.toDataURL(partner.referralLink, {
+        width: 2048,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF',
+        },
+      });
+      
+      const link = document.createElement('a');
+      link.href = highResQr;
+      link.download = `websbaca-qr-${partner.partnerId || 'partner'}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error('Failed to download PNG:', error);
+    }
+  };
+
+  const handleDownloadPDF = async () => {
+    if (!partner?.referralLink) return;
+    try {
+      const highResQr = await QRCode.toDataURL(partner.referralLink, {
+        width: 1024,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF',
+        },
+      });
+
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(`
+          <html>
+            <head>
+              <title>QR Code - ${partner.partnerId}</title>
+              <style>
+                body { 
+                  margin: 0; 
+                  display: flex; 
+                  flex-direction: column;
+                  justify-content: center; 
+                  align-items: center; 
+                  height: 100vh; 
+                  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                  background: white;
+                  color: black;
+                }
+                .container { text-align: center; padding: 40px; }
+                img { width: 400px; height: 400px; margin: 20px 0; }
+                h1 { font-size: 24px; font-weight: 900; text-transform: uppercase; letter-spacing: -0.05em; }
+                p { font-weight: bold; color: #666; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <h1>WebsBaca Partner QR</h1>
+                <img src="${highResQr}" />
+                <p>Partner ID: ${partner.partnerId}</p>
+              </div>
+              <script>
+                window.onload = () => {
+                  window.print();
+                };
+              </script>
+            </body>
+          </html>
+        `);
+        printWindow.document.close();
+      }
+    } catch (error) {
+      console.error('Failed to generate PDF:', error);
+    }
   };
 
   const handleRegisterSubmit = async (e: React.FormEvent) => {
@@ -323,24 +400,37 @@ export default function PartnerProgramPage() {
               transition={{ delay: 0.7 }}
               className="bg-gradient-to-br from-cyan-50 dark:from-cyan-500/10 to-blue-50 dark:to-blue-500/5 border border-cyan-200 dark:border-cyan-500/20 rounded-3xl p-8"
             >
-              <h3 className="text-2xl font-black mb-6 text-gray-900 dark:text-white">QR Code Generator</h3>
+              <h3 className="text-2xl font-black mb-6 text-gray-900 dark:text-white uppercase tracking-tighter">QR Code Generator</h3>
               {qrCode && (
-                <div className="mb-4 flex justify-center">
-                  <div className="bg-white p-4 rounded-xl inline-block">
-                    <img src={qrCode} alt="QR Code" className="w-40 h-40" />
+                <div className="mb-6 flex justify-center">
+                  <div className="bg-white p-4 rounded-2xl inline-block shadow-2xl">
+                    <img src={qrCode} alt="QR Code" className="w-48 h-48" />
                   </div>
                 </div>
               )}
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={handleDownloadQR}
-                className="w-full flex items-center justify-center gap-2 bg-cyan-500/20 hover:bg-cyan-500/30 dark:bg-cyan-500/20 dark:hover:bg-cyan-500/30 border border-cyan-500/50 dark:border-cyan-500/50 text-cyan-600 dark:text-cyan-400 px-4 py-3 rounded-lg transition font-bold"
-              >
-                <Download size={18} />
-                Download High-Res QR
-              </motion.button>
-              <p className="text-xs text-gray-600 dark:text-zinc-400 mt-2 font-bold">Print or share digitally with your audience</p>
+              
+              <div className="space-y-3">
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handleDownloadPNG}
+                  className="w-full flex items-center justify-center gap-3 bg-gray-900 dark:bg-white text-white dark:text-gray-900 px-6 py-4 rounded-xl transition font-black uppercase tracking-tighter shadow-xl group"
+                >
+                  <Download size={20} className="group-hover:translate-y-0.5 transition-transform" />
+                  Download PNG
+                </motion.button>
+
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handleDownloadPDF}
+                  className="w-full flex items-center justify-center gap-3 bg-white dark:bg-white/10 text-gray-900 dark:text-white border-2 border-gray-900 dark:border-white/20 px-6 py-4 rounded-xl transition font-black uppercase tracking-tighter shadow-lg group"
+                >
+                  <Download size={20} className="group-hover:translate-y-0.5 transition-transform" />
+                  Download PDF
+                </motion.button>
+              </div>
+              <p className="text-xs text-gray-600 dark:text-zinc-400 mt-4 font-bold text-center">High-resolution QR for your videos and print materials</p>
             </motion.div>
           </div>
         </main>
